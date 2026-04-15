@@ -1,0 +1,460 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>log: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">github.com/markoxley/lighthouse/log/log.go (98.0%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">not covered</span>
+				<span class="cov8">covered</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package log
+
+import (
+        "database/sql"
+        "encoding/json"
+        "fmt"
+        "log"
+        "os"
+        "os/signal"
+        "regexp"
+        "strings"
+        "sync"
+        "syscall"
+        "time"
+)
+
+type LogLevel int
+type LogFunc func(level LogLevel, dt time.Time, message string, params map[string]string)
+type LogDB int
+
+func (ll LogLevel) String() string <span class="cov8" title="1">{
+        switch ll </span>{
+        case LogLevelDebug:<span class="cov8" title="1">
+                return "DEBUG"</span>
+        case LogLevelInfo:<span class="cov8" title="1">
+                return "INFO"</span>
+        case LogLevelWarn:<span class="cov8" title="1">
+                return "WARN"</span>
+        case LogLevelError:<span class="cov8" title="1">
+                return "ERROR"</span>
+        case LogLevelPanic:<span class="cov8" title="1">
+                return "PANIC"</span>
+        case LogLevelFatal:<span class="cov8" title="1">
+                return "FATAL"</span>
+        default:<span class="cov8" title="1">
+                return "UNKNOWN"</span>
+        }
+}
+
+var (
+        logger *Logger
+        pfxs   = map[string]LogLevel{
+                LogLevelDebug.String(): LogLevelDebug,
+                LogLevelInfo.String():  LogLevelInfo,
+                LogLevelWarn.String():  LogLevelWarn,
+                LogLevelError.String(): LogLevelError,
+                LogLevelPanic.String(): LogLevelPanic,
+                LogLevelFatal.String(): LogLevelFatal,
+        }
+        logColours = map[LogLevel]string{
+                LogLevelDebug: Blue,
+                LogLevelInfo:  Green,
+                LogLevelWarn:  Yellow,
+                LogLevelError: Red,
+                LogLevelPanic: Magenta,
+                LogLevelFatal: Red,
+        }
+)
+
+type logObject struct {
+        level   LogLevel
+        dt      time.Time
+        message string
+        params  map[string]string
+}
+type Logger struct {
+        logLevel     LogLevel
+        logFunc      LogFunc
+        mu           sync.Mutex
+        buffer       chan logObject
+        wg           sync.WaitGroup
+        db           *sql.DB
+        dbType       LogDB
+        insertString string
+}
+
+func (l *Logger) Write(p []byte) (n int, err error) <span class="cov8" title="1">{
+        lvl := LogLevelInfo
+        m := string(p)
+        dt := time.Now()
+        if len(p) &gt;= 20 </span><span class="cov8" title="1">{
+                dt, err = time.Parse("2006/01/02 15:04:05", string(p[:19]))
+                if err != nil </span><span class="cov8" title="1">{
+                        dt = time.Now()
+                }</span> else<span class="cov8" title="1"> {
+                        m = string(p[20:])
+                }</span>
+        }
+        <span class="cov8" title="1">for k, v := range pfxs </span><span class="cov8" title="1">{
+                if strings.HasPrefix(m, k) </span><span class="cov8" title="1">{
+                        lvl = v
+                        break</span>
+                }
+        }
+        <span class="cov8" title="1">l.write(lvl, dt, m, nil)
+        return len(p), nil</span>
+}
+
+func init() <span class="cov8" title="1">{
+        logger = &amp;Logger{
+                logLevel: LogLevelInfo,
+                buffer:   make(chan logObject, bufferSize),
+        }
+        log.SetOutput(logger)
+        logger.wg.Add(1)
+        c := make(chan os.Signal, 1)
+        signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+        go func() </span><span class="cov8" title="1">{
+                &lt;-c
+                flush()
+                os.Exit(0)
+        }</span>()
+        <span class="cov8" title="1">go logger.processBuffer()</span>
+}
+
+func SetLevel(level LogLevel) <span class="cov8" title="1">{
+        logger.mu.Lock()
+        defer logger.mu.Unlock()
+        logger.logLevel = level
+}</span>
+
+func SetOutput(logFunc LogFunc) <span class="cov8" title="1">{
+        logger.mu.Lock()
+        defer logger.mu.Unlock()
+        logger.logFunc = logFunc
+}</span>
+
+func SetDatabase(dbType LogDB, db *sql.DB, table ...string) error <span class="cov8" title="1">{
+        if db == nil </span><span class="cov8" title="1">{
+                return fmt.Errorf("database connection cannot be nil")
+        }</span>
+        <span class="cov8" title="1">logger.mu.Lock()
+        defer logger.mu.Unlock()
+        logger.db = db
+        tableName := defaultTableName
+        if len(table) &gt; 0 </span><span class="cov8" title="1">{
+                tableName = table[0]
+        }</span>
+        <span class="cov8" title="1">tableName = sanitizeTableName(tableName)
+        tblQuery, idxQuery, insertQuery, err := getTableCreation(dbType)
+        if err != nil </span><span class="cov8" title="1">{
+                return err
+        }</span>
+        <span class="cov8" title="1">_, err = logger.db.Exec(fmt.Sprintf(tblQuery, tableName))
+        if err != nil </span><span class="cov8" title="1">{
+                return fmt.Errorf("failed to create table %s: %s", tableName, err.Error())
+        }</span>
+        <span class="cov8" title="1">_, err = logger.db.Exec(fmt.Sprintf(idxQuery, tableName))
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("failed to create index on table %s: %s", tableName, err.Error())
+        }</span>
+        <span class="cov8" title="1">logger.insertString = fmt.Sprintf(insertQuery, tableName)
+        return nil</span>
+}
+
+func (l *Logger) processBuffer() <span class="cov8" title="1">{
+        defer l.wg.Done()
+        for logObj := range l.buffer </span><span class="cov8" title="1">{
+                l.write(logObj.level, logObj.dt, logObj.message, logObj.params)
+                if logObj.level &gt;= LogLevelFatal </span><span class="cov8" title="1">{
+                        os.Exit(1)
+                }</span>
+                <span class="cov8" title="1">if logObj.level &gt;= LogLevelPanic </span><span class="cov0" title="0">{
+                        panic(logObj.message)</span>
+                }
+        }
+}
+
+func (l *Logger) write(level LogLevel, dt time.Time, message string, params map[string]string) <span class="cov8" title="1">{
+        l.mu.Lock()
+        defer l.mu.Unlock()
+        if level &lt; l.logLevel </span><span class="cov8" title="1">{
+                return
+        }</span>
+        <span class="cov8" title="1">col := logColours[level]
+        for strings.HasSuffix(message, "\n") </span><span class="cov8" title="1">{
+                message = message[:len(message)-1]
+        }</span>
+        <span class="cov8" title="1">fmt.Printf("%s %s%s%s\n", dt.Format("2006/01/02 15:04:05"), col, message, ansiReset)
+        if l.logFunc != nil </span><span class="cov8" title="1">{
+                l.logFunc(level, dt, message, params)
+        }</span>
+        <span class="cov8" title="1">if l.db != nil &amp;&amp; l.insertString != "" </span><span class="cov8" title="1">{
+                paramsJSON, err := json.Marshal(params)
+                if err != nil </span><span class="cov0" title="0">{
+                        paramsJSON = []byte("{}")
+                }</span>
+                <span class="cov8" title="1">l.db.Exec(l.insertString, dt.Unix(), level, level.String(), message, string(paramsJSON))</span>
+        }
+}
+
+func parseMessage(message string, args ...interface{}) (string, map[string]string) <span class="cov8" title="1">{
+        if len(args) == 0 </span><span class="cov8" title="1">{
+                return message, nil
+        }</span>
+        <span class="cov8" title="1">keys := make([]string, 0, len(args))
+        current := ""
+        slash := false
+        inKey := false
+        for _, c := range message </span><span class="cov8" title="1">{
+                if c == '\\' &amp;&amp; !slash </span><span class="cov8" title="1">{
+                        slash = true
+                        continue</span>
+                }
+                <span class="cov8" title="1">if c == '{' &amp;&amp; !slash &amp;&amp; !inKey </span><span class="cov8" title="1">{
+                        current = ""
+                        inKey = true
+                        continue</span>
+                }
+                <span class="cov8" title="1">if c == '}' &amp;&amp; !slash &amp;&amp; inKey </span><span class="cov8" title="1">{
+                        keys = append(keys, current)
+                        current = ""
+                        inKey = false
+                        continue</span>
+                }
+                <span class="cov8" title="1">if inKey </span><span class="cov8" title="1">{
+                        current += string(c)
+                }</span>
+                <span class="cov8" title="1">slash = false</span>
+        }
+        <span class="cov8" title="1">result := make(map[string]string)
+        for i, k := range keys </span><span class="cov8" title="1">{
+                if _, exists := result[k]; exists </span><span class="cov8" title="1">{
+                        // Skip duplicate keys - they already have a value
+                        continue</span>
+                }
+                <span class="cov8" title="1">if i &lt; len(args) </span><span class="cov8" title="1">{
+                        result[k] = fmt.Sprintf("%v", args[i])
+                }</span> else<span class="cov8" title="1"> {
+                        result[k] = ""
+                }</span>
+        }
+        <span class="cov8" title="1">for _, k := range keys </span><span class="cov8" title="1">{
+                message = strings.ReplaceAll(message, "{"+k+"}", result[k])
+        }</span>
+        <span class="cov8" title="1">return message, result</span>
+}
+
+func Debug(message string, args ...interface{}) <span class="cov8" title="1">{
+        msg, params := parseMessage(message, args...)
+        logger.buffer &lt;- logObject{
+                level:   LogLevelDebug,
+                dt:      time.Now(),
+                message: msg,
+                params:  params,
+        }
+}</span>
+
+func Info(message string, args ...interface{}) <span class="cov8" title="1">{
+        msg, params := parseMessage(message, args...)
+        logger.buffer &lt;- logObject{
+                level:   LogLevelInfo,
+                dt:      time.Now(),
+                message: msg,
+                params:  params,
+        }
+}</span>
+
+func Warn(message string, args ...interface{}) <span class="cov8" title="1">{
+        msg, params := parseMessage(message, args...)
+        logger.buffer &lt;- logObject{
+                level:   LogLevelWarn,
+                dt:      time.Now(),
+                message: msg,
+                params:  params,
+        }
+}</span>
+
+func Error(message string, args ...interface{}) <span class="cov8" title="1">{
+        msg, params := parseMessage(message, args...)
+        logger.buffer &lt;- logObject{
+                level:   LogLevelError,
+                dt:      time.Now(),
+                message: msg,
+                params:  params,
+        }
+}</span>
+
+func Panic(message string, args ...interface{}) <span class="cov8" title="1">{
+        msg, params := parseMessage(message, args...)
+        logObj := logObject{level: LogLevelPanic, dt: time.Now(), message: msg, params: params}
+
+        select </span>{
+        case logger.buffer &lt;- logObj:<span class="cov8" title="1"></span>
+                // Successfully queued, processBuffer will exit
+        default:<span class="cov8" title="1">
+                // Buffer full - write directly and exit
+                logger.write(LogLevelPanic, time.Now(), msg, params)
+                panic(msg)</span>
+        }
+}
+
+func Fatal(message string, args ...interface{}) <span class="cov8" title="1">{
+        msg, params := parseMessage(message, args...)
+        logObj := logObject{level: LogLevelFatal, dt: time.Now(), message: msg, params: params}
+
+        select </span>{
+        case logger.buffer &lt;- logObj:<span class="cov8" title="1"></span>
+                // Successfully queued, processBuffer will exit
+        default:<span class="cov8" title="1">
+                // Buffer full - write directly and exit
+                logger.write(LogLevelFatal, time.Now(), msg, params)
+                os.Exit(1)</span>
+        }
+}
+
+func Debugf(message string, args ...interface{}) <span class="cov8" title="1">{
+        Debug(fmt.Sprintf(message, args...))
+}</span>
+
+func Infof(message string, args ...interface{}) <span class="cov8" title="1">{
+        Info(fmt.Sprintf(message, args...))
+}</span>
+
+func Warnf(message string, args ...interface{}) <span class="cov8" title="1">{
+        Warn(fmt.Sprintf(message, args...))
+}</span>
+
+func Errorf(message string, args ...interface{}) <span class="cov8" title="1">{
+        Error(fmt.Sprintf(message, args...))
+}</span>
+
+func Panicf(message string, args ...interface{}) <span class="cov8" title="1">{
+        Panic(fmt.Sprintf(message, args...))
+}</span>
+
+func Fatalf(message string, args ...interface{}) <span class="cov8" title="1">{
+        Fatal(fmt.Sprintf(message, args...))
+}</span>
+
+func flush() <span class="cov8" title="1">{
+        close(logger.buffer)
+        logger.wg.Wait()
+}</span>
+
+func getTableCreation(dbType LogDB) (string, string, string, error) <span class="cov8" title="1">{
+        switch dbType </span>{
+        case LogDBSQLite:<span class="cov8" title="1">
+                return sqliteCreateTableQuery, sqliteCreateIndexQuery, sqliteInsertQuery, nil</span>
+        case LogDBPostgreSQL:<span class="cov8" title="1">
+                return postgreSQLCreateTableQuery, postgreSQLCreateIndexQuery, postgreSQLInsertQuery, nil</span>
+        case LogDBMySQL:<span class="cov8" title="1">
+                return mysqlCreateTableQuery, mysqlCreateIndexQuery, mysqlInsertQuery, nil</span>
+        case LogDBMSSQL:<span class="cov8" title="1">
+                return mssqlCreateTableQuery, mssqlCreateIndexQuery, mssqlInsertQuery, nil</span>
+        case LogDBOracle:<span class="cov8" title="1">
+                return oracleCreateTableQuery, oracleCreateIndexQuery, oracleInsertQuery, nil</span>
+        default:<span class="cov8" title="1">
+                return "", "", "", fmt.Errorf("unsupported database type")</span>
+        }
+}
+
+func sanitizeTableName(name string) string <span class="cov8" title="1">{
+        name = strings.NewReplacer(`"`, "", `'`, "").Replace(name)
+        reg := regexp.MustCompile(`[^a-zA-Z0-9_]+`)
+        return reg.ReplaceAllString(name, "")
+}</span>
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>
