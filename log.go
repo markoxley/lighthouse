@@ -311,9 +311,11 @@ func (l *Logger) write(level LogLevel, dt time.Time, message string, params map[
 	for strings.HasSuffix(message, "\n") {
 		message = message[:len(message)-1]
 	}
-	fmt.Printf("%s %s%s%s\n", dt.Format("2006/01/02 15:04:05"), col, message, ansiReset)
+
 	if l.logFunc != nil {
 		l.logFunc(level, dt, message, params)
+	} else {
+		fmt.Printf("%s %s%s%s\n", dt.Format("2006/01/02 15:04:05"), col, message, ansiReset)
 	}
 	if l.db != nil && l.insertString != "" {
 		paramsJSON, _ := json.Marshal(params)
