@@ -10,7 +10,7 @@ A production-ready, high-performance logging module for Go applications featurin
 
 ## Features
 
-- **Asynchronous Buffered Logging** - Non-blocking log calls with a 10,000 entry buffer for high-throughput applications
+- **Asynchronous Buffered Logging** - Non-blocking log calls with 10,000 entry buffer; falls back to synchronous write when buffer is full to prevent deadlocks
 - **Thread-Safe** - Full concurrency support with mutex protection for all operations
 - **Structured Logging** - Template-based placeholders: `lighthouse.Info("User {user} logged in", username)`
 - **Multiple Log Levels** - Debug, Info, Warn, Error, Panic, Fatal with level filtering
@@ -176,7 +176,7 @@ func init() {
     // Redirect standard library logs to Lighthouse
     // This is done automatically when importing the package
     // but can be configured explicitly:
-    log.SetOutput(lighthouse.Logger)
+    log.SetOutput(lighthouse.DefaultLogger)
 }
 
 func main() {
@@ -223,13 +223,45 @@ lighthouse.Errorf("Operation failed: %v", err)
                                     └─────────┘   └────────────────┘   └────────────┘
 ```
 
+### Instance-Based API
+
+For advanced use cases requiring multiple independent loggers or for testing, create Logger instances:
+
+```go
+package main
+
+import (
+    "github.com/markoxley/lighthouse"
+)
+
+func main() {
+    // Create a new logger instance
+    logger := lighthouse.NewLogger(lighthouse.LogLevelDebug)
+    logger.Start()
+    defer logger.Stop()
+    
+    // Use instance methods
+    logger.Info("Component started")
+    logger.Debug("Processing item {id}", 42)
+    
+    // Configure instance-specific settings
+    logger.SetLevel(lighthouse.LogLevelWarn)
+    logger.SetOutput(func(level lighthouse.LogLevel, dt time.Time, message string, params map[string]string) {
+        // Custom handler for this logger only
+    })
+}
+```
+
+**Note**: The package-level functions (`lighthouse.Info()`, etc.) use a global logger instance and remain available for simple use cases.
+
 ### Thread Safety
 
 All public functions are thread-safe:
 - `SetLevel()`, `SetOutput()`, `SetDatabase()` use mutex protection
-- `Debug()`, `Info()`, etc. use non-blocking channel sends
+- `Debug()`, `Info()`, etc. use non-blocking channel sends with fallback to synchronous write
 - Console output is synchronized via mutex
 - Database writes happen in the single processBuffer goroutine
+- Database write errors are logged to console in red with `[DB ERROR]` prefix
 
 ### Graceful Shutdown
 
@@ -269,41 +301,57 @@ BenchmarkParseMessage-8      5000000     325 ns/op   48 B/op    3 allocs/op
 BenchmarkSanitizeTableName-8 10000000   112 ns/op    0 B/op    0 allocs/op
 ```
 
-The buffered channel design ensures that logging calls return immediately (non-blocking) in normal operation, only blocking if the 10,000 entry buffer fills up.
+The buffered channel design ensures that logging calls return immediately (non-blocking) in normal operation. If the 10,000 entry buffer fills up, logs fall back to synchronous writes to prevent deadlocks, ensuring no log is lost even under extreme load.
 
 ## API Reference
 
 ### Logging Functions
 
 ```go
-// Template-based logging (recommended)
+// Package-level (global logger)
 func Debug(message string, args ...interface{})
 func Info(message string, args ...interface{})
 func Warn(message string, args ...interface{})
 func Error(message string, args ...interface{})
 func Panic(message string, args ...interface{})  // Triggers panic after logging
 func Fatal(message string, args ...interface{})  // Exits with code 1 after logging
-
-// Formatted logging (printf-style)
 func Debugf(message string, args ...interface{})
 func Infof(message string, args ...interface{})
 func Warnf(message string, args ...interface{})
 func Errorf(message string, args ...interface{})
 func Panicf(message string, args ...interface{})
 func Fatalf(message string, args ...interface{})
+
+// Instance-based methods
+func (l *Logger) Debug(message string, args ...interface{})
+func (l *Logger) Info(message string, args ...interface{})
+func (l *Logger) Warn(message string, args ...interface{})
+func (l *Logger) Error(message string, args ...interface{})
+func (l *Logger) Panic(message string, args ...interface{})
+func (l *Logger) Fatal(message string, args ...interface{})
+func (l *Logger) Debugf(message string, args ...interface{})
+func (l *Logger) Infof(message string, args ...interface{})
+func (l *Logger) Warnf(message string, args ...interface{})
+func (l *Logger) Errorf(message string, args ...interface{})
+func (l *Logger) Panicf(message string, args ...interface{})
+func (l *Logger) Fatalf(message string, args ...interface{})
 ```
 
 ### Configuration Functions
 
 ```go
-// Set minimum log level (Debug=0, Info=1, Warn=2, Error=3, Panic=4, Fatal=5)
+// Package-level (global logger)
 func SetLevel(level LogLevel)
-
-// Set custom handler for log entries
 func SetOutput(logFunc LogFunc)
-
-// Configure database persistence
 func SetDatabase(dbType LogDB, db *sql.DB, table ...string) error
+
+// Instance-based
+func NewLogger(level LogLevel) *Logger
+func (l *Logger) Start()
+func (l *Logger) Stop()
+func (l *Logger) SetLevel(level LogLevel)
+func (l *Logger) SetOutput(logFunc LogFunc)
+func (l *Logger) SetDatabase(dbType LogDB, db *sql.DB, table ...string) error
 ```
 
 ### Types
@@ -332,6 +380,12 @@ const (
 
 // LogFunc is the handler callback signature
 type LogFunc func(level LogLevel, dt time.Time, message string, params map[string]string)
+
+// Logger is the core logging structure
+type Logger struct { ... }
+
+// DefaultLogger provides access to the global logger instance
+var DefaultLogger *Logger
 ```
 
 ## Contributing

@@ -1,5 +1,5 @@
 module github.com/markoxley/lighthouse
 
-go 1.26.1
+go 1.21
 
 require github.com/mattn/go-sqlite3 v1.14.42 // indirect
