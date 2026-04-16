@@ -143,7 +143,7 @@ type Logger struct {
 // It parses the input to extract timestamp and log level from standard formatted messages.
 // The format "2006/01/02 15:04:05 LEVEL message" is recognized and parsed appropriately.
 //
-// This method enables integration like: log.SetOutput(lighthouse.Logger)
+// This method enables integration like: log.SetOutput(lighthouse.DefaultLogger)
 func (l *Logger) Write(p []byte) (n int, err error) {
 	lvl := LogLevelInfo
 	m := string(p)
@@ -170,15 +170,7 @@ func (l *Logger) Write(p []byte) (n int, err error) {
 // It sets up:
 //   - A Logger instance with default Info level and buffered channel
 //   - Signal handling for graceful shutdown on SIGINT/SIGTERM
-//   - The background buffer processing goroutine
-//   - Integration with the standard library log package
-//
-// This function is called automatically when the package is imported.
-// init initializes the package-level logger singleton.
-// It sets up:
-//   - A Logger instance with default Info level and buffered channel
-//   - Signal handling for graceful shutdown on SIGINT/SIGTERM
-//   - The background buffer processing goroutine
+//   - The background buffer processing goroutine (via Start())
 //   - Integration with the standard library log package
 //
 // This function is called automatically when the package is imported.
@@ -409,6 +401,7 @@ func (l *Logger) processBuffer() {
 
 // write outputs a log entry to all configured destinations.
 // It handles console output with ANSI colors, custom log functions, and database persistence.
+// Database write errors are logged to console with a [DB ERROR] prefix.
 // This method is called internally by processBuffer and is protected by a mutex for thread safety.
 // Messages below the current log level are silently discarded.
 func (l *Logger) write(level LogLevel, dt time.Time, message string, params map[string]string) {
@@ -452,9 +445,9 @@ func (l *Logger) write(level LogLevel, dt time.Time, message string, params map[
 //   - The message with placeholders replaced
 //   - A map of parameter names to values for structured logging
 //
-// Example:
+// Example (internal use):
 //
-//	msg, params := lighthouse.parseMessage("Hello {name}, you have {count} messages", "Alice", "5")
+//	msg, params := parseMessage("Hello {name}, you have {count} messages", "Alice", "5")
 //	// msg = "Hello Alice, you have 5 messages"
 //	// params = {"name": "Alice", "count": "5"}
 func parseMessage(message string, args ...interface{}) (string, map[string]string) {
@@ -867,9 +860,9 @@ func getTableCreation(dbType LogDB) (string, string, string, error) {
 // sanitizeTableName removes dangerous characters from a table name to prevent SQL injection.
 // It removes quotes and any non-alphanumeric characters (except underscores).
 //
-// Example:
+// Example (internal use):
 //
-//	safe := lighthouse.sanitizeTableName("logs; DROP TABLE users;--")
+//	safe := sanitizeTableName("logs; DROP TABLE users;--")
 //	// safe = "logsDROPTABLEusers"
 func sanitizeTableName(name string) string {
 	name = strings.NewReplacer(`"`, "", `'`, "").Replace(name)
