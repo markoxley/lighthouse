@@ -869,3 +869,7 @@ func sanitizeTableName(name string) string {
 	reg := regexp.MustCompile(`[^a-zA-Z0-9_]+`)
 	return reg.ReplaceAllString(name, "")
 }
+
+func Flush() {
+	flush()
+}
